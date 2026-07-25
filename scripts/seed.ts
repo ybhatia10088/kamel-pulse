@@ -1,6 +1,3 @@
-import { existsSync } from 'node:fs';
-if (!process.env.DATABASE_URL && existsSync('.env.local')) process.loadEnvFile('.env.local');
-
 import { sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { events } from '@/db/schema';

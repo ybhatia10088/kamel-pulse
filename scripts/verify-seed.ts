@@ -1,6 +1,3 @@
-import { existsSync } from 'node:fs';
-if (!process.env.DATABASE_URL && existsSync('.env.local')) process.loadEnvFile('.env.local');
-
 import { sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 
@@ -20,8 +17,8 @@ function check(name: string, value: number, target: number, tolerance: number, u
 }
 
 async function scalar(query: ReturnType<typeof sql>): Promise<number> {
-  const rows = (await db.execute(query)) as unknown as Record<string, unknown>[];
-  const row = rows[0] ?? {};
+  const result = await db.execute(query);
+  const row = (result.rows[0] as Record<string, unknown>) ?? {};
   const v = Object.values(row)[0];
   return v === null || v === undefined ? 0 : Number(v);
 }
@@ -73,7 +70,7 @@ async function f1(): Promise<void> {
 }
 
 async function f2(): Promise<void> {
-  const rows = (await db.execute(sql`
+  const result = await db.execute(sql`
     WITH engaged AS (
       SELECT DISTINCT session_id FROM events WHERE event_name = 'driver_profile_viewed'
     ),
@@ -91,8 +88,8 @@ async function f2(): Promise<void> {
     FROM engaged e
     LEFT JOIN messaged m ON m.session_id = e.session_id
     LEFT JOIN booked b ON b.session_id = e.session_id
-  `)) as unknown as Record<string, string>[];
-  const r = rows[0];
+  `);
+  const r = result.rows[0] as Record<string, string>;
   const messagedRate = (Number(r.messaged_booked) / Math.max(Number(r.messaged_total), 1)) * 100;
   const nonMessagedRate = (Number(r.non_messaged_booked) / Math.max(Number(r.non_messaged_total), 1)) * 100;
   check('F2 messaged-first conversion', messagedRate, 62, 6, '%');
@@ -100,7 +97,7 @@ async function f2(): Promise<void> {
 }
 
 async function f3(): Promise<void> {
-  const rows = (await db.execute(sql`
+  const result = await db.execute(sql`
     WITH driver_reviews AS (
       SELECT driver_id, COUNT(*) AS n
       FROM events
@@ -126,8 +123,8 @@ async function f3(): Promise<void> {
     FROM driver_seats s
     LEFT JOIN driver_reviews r ON r.driver_id = s.driver_id
     LEFT JOIN driver_booked bk ON bk.driver_id = s.driver_id
-  `)) as unknown as Record<string, string>[];
-  const r = rows[0];
+  `);
+  const r = result.rows[0] as Record<string, string>;
   const veteranFill = (Number(r.veteran_booked) / Math.max(Number(r.veteran_listed), 1)) * 100;
   const zeroFill = (Number(r.zero_booked) / Math.max(Number(r.zero_listed), 1)) * 100;
   check('F3 drivers with >=3 reviews fill rate', veteranFill, 78, 6, '%');
@@ -141,15 +138,15 @@ async function f4(): Promise<void> {
     return listed / Math.max(demanded, 1);
   }
   async function roleDuality(campus: string) {
-    const rows = (await db.execute(sql`
+    const result = await db.execute(sql`
       WITH campus_users AS (SELECT DISTINCT user_id FROM events WHERE campus = ${campus} AND user_id IS NOT NULL),
       listed AS (SELECT DISTINCT user_id FROM events WHERE event_name = 'ride_listed'),
       reserved AS (SELECT DISTINCT user_id FROM events WHERE event_name = 'seat_reserved')
       SELECT
         (SELECT COUNT(*) FROM campus_users) AS total,
         (SELECT COUNT(*) FROM campus_users cu JOIN listed l ON l.user_id = cu.user_id JOIN reserved r ON r.user_id = cu.user_id) AS both_count
-    `)) as unknown as Record<string, string>[];
-    const r = rows[0];
+    `);
+    const r = result.rows[0] as Record<string, string>;
     return (Number(r.both_count) / Math.max(Number(r.total), 1)) * 100;
   }
 
@@ -160,7 +157,7 @@ async function f4(): Promise<void> {
 }
 
 async function f5(): Promise<void> {
-  const rows = (await db.execute(sql`
+  const result = await db.execute(sql`
     SELECT
       percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (departure_at - occurred_at)) / 86400)
         FILTER (WHERE NOT (departure_at::date >= '2025-11-22' AND departure_at::date <= '2025-11-30')) AS baseline_median,
@@ -168,29 +165,29 @@ async function f5(): Promise<void> {
         FILTER (WHERE departure_at::date >= '2025-11-22' AND departure_at::date <= '2025-11-30') AS thanksgiving_median,
       percentile_cont(0.9) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (departure_at - occurred_at)) / 86400) AS p90
     FROM events WHERE event_name = 'booking_completed'
-  `)) as unknown as Record<string, string>[];
-  const r = rows[0];
+  `);
+  const r = result.rows[0] as Record<string, string>;
   check('F5 baseline median lead time', Number(r.baseline_median), 6, 2, 'd');
   check('F5 Thanksgiving median lead time', Number(r.thanksgiving_median), 19, 4, 'd');
   check('F5 overall p90 lead time', Number(r.p90), 31, 8, 'd');
 }
 
 async function f6(): Promise<void> {
-  const rows = (await db.execute(sql`
+  const result = await db.execute(sql`
     WITH listed AS (SELECT DISTINCT user_id FROM events WHERE event_name = 'ride_listed'),
     reserved AS (SELECT DISTINCT user_id FROM events WHERE event_name = 'seat_reserved'),
     total_users AS (SELECT COUNT(*) AS n FROM events WHERE event_name = 'user_signed_up')
     SELECT
       (SELECT n FROM total_users) AS total,
       (SELECT COUNT(*) FROM listed l JOIN reserved r ON r.user_id = l.user_id) AS both_count
-  `)) as unknown as Record<string, string>[];
-  const r = rows[0];
+  `);
+  const r = result.rows[0] as Record<string, string>;
   const rate = (Number(r.both_count) / Math.max(Number(r.total), 1)) * 100;
   check('F6 overall role duality', rate, 21, 5, '%');
 }
 
 async function f7(): Promise<void> {
-  const rows = (await db.execute(sql`
+  const result = await db.execute(sql`
     WITH ordered AS (
       SELECT driver_id, user_id, occurred_at,
         ROW_NUMBER() OVER (PARTITION BY driver_id, user_id ORDER BY occurred_at) AS rn
@@ -200,8 +197,8 @@ async function f7(): Promise<void> {
       COUNT(*) AS total,
       COUNT(*) FILTER (WHERE rn > 1) AS repeats
     FROM ordered
-  `)) as unknown as Record<string, string>[];
-  const r = rows[0];
+  `);
+  const r = result.rows[0] as Record<string, string>;
   const rate = (Number(r.repeats) / Math.max(Number(r.total), 1)) * 100;
   check('F7 repeat pairing rate', rate, 14, 5, '%');
 }
