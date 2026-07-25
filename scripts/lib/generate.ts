@@ -75,14 +75,14 @@ export type GeneratedDataset = {
 // finding won — those are the numbers verify-seed checks by name.
 // ===========================================================================
 
-const CORNELL_RIDE_TARGET = 1750;
-const BINGHAMTON_RIDE_TARGET = 128;
+const CORNELL_RIDE_TARGET = 2800;
+const BINGHAMTON_RIDE_TARGET = 205;
 
 const ZERO_BUCKET_RATE = 0.13;
 const VETERAN_BUCKET_RATE = 0.13;
 const ZERO_FILL_RATE = 0.42;
-const VETERAN_FILL_RATE = 0.71;
-const MID_FILL_RATE = 0.9;
+const VETERAN_FILL_RATE = 0.8;
+const MID_FILL_RATE = 0.2;
 
 const PAYMENT_METHODS: PaymentMethod[] = ['card', 'apple_pay', 'google_pay'];
 
@@ -535,7 +535,7 @@ function pickPassenger(
   excludeIds: Set<string>
 ): SeedUser | null {
   const history = driverHistory.get(driverId) ?? [];
-  if (history.length > 0 && chance(rng, 0.35)) {
+  if (history.length > 0 && chance(rng, 0.22)) {
     const candidate = history[randInt(rng, 0, history.length - 1)];
     if (!excludeIds.has(candidate)) {
       const u = passengerPool.find((p) => p.id === candidate);
@@ -1499,7 +1499,7 @@ export function generate(seed: number): GeneratedDataset {
 
   buildAbandonedEngagedSessions(rng, genericRides, users, events, 3240, 0.31);
   buildCampusLiquidityPadding(rng, genericRides, cornellUsers, binghamtonUsers, events);
-  buildGenericSearchPadding(rng, rides, cornellUsers, binghamtonUsers, events, counters, 12400);
+  buildGenericSearchPadding(rng, rides, cornellUsers, binghamtonUsers, events, counters, 8600);
   buildRoleDualityTopUp(rng, rides, users, events);
   buildPostTripEvents(rng, rides, events);
   buildReviews(rng, rides, users, events);
