@@ -30,8 +30,15 @@ export const DIRECTED_CORRIDORS: DirectedCorridor[] = CORRIDOR_PAIRS.flatMap((pa
   ];
 });
 
-/** true when this corridor is a "leaving campus" (outbound, Thu/Fri-heavy) direction. */
-export function isOutboundDirection(c: Pick<DirectedCorridor, 'origin'>): boolean {
+/**
+ * true when this corridor is a "leaving campus" (outbound, Thu/Fri-heavy)
+ * direction. Ithaca is the primary hub: for Ithaca<->Binghamton, both
+ * endpoints are campus cities, so origin-alone can't tell the directions
+ * apart without this tie-break.
+ */
+export function isOutboundDirection(c: Pick<DirectedCorridor, 'origin' | 'destination'>): boolean {
+  if (c.origin === 'ithaca') return true;
+  if (c.destination === 'ithaca') return false;
   return CAMPUS_CITIES.has(c.origin);
 }
 

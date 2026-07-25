@@ -120,7 +120,7 @@ export async function getHeatmapData(): Promise<CorridorPairRow[]> {
     }
     const pair = pairs.get(pk)!;
     pair.totalVolume += volume;
-    if (isOutboundDirection(origin)) {
+    if (isOutboundDirection(origin, destination)) {
       pair.outbound = { origin, destination, cells };
       pair.label = corridorLabel(origin, destination).split(' → ')[0] + ' ↔ ' + corridorLabel(origin, destination).split(' → ')[1];
     } else {
