@@ -33,6 +33,16 @@ body {
   background: var(--paper);
   color: var(--ink);
   font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  overflow-x: hidden;
+}
+
+/* Flex children default to min-width: auto, so a wide descendant (a table
+   with a min-width, a chart's intrinsic size) can force an ancestor wider
+   than the viewport instead of letting it reflow. body is flex-col (see
+   layout.tsx) and main is flex-col too, so both levels need it. */
+body > main,
+main.flex-col > * {
+  min-width: 0;
 }
 
 .font-tabular {
