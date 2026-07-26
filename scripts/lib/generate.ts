@@ -88,6 +88,16 @@ const PAYMENT_METHODS: PaymentMethod[] = ['card', 'apple_pay', 'google_pay'];
 
 const F1_OUT_DATES = ['2025-11-25', '2025-11-26'];
 const F1_RETURN_DATES = ['2025-11-30', '2025-12-01'];
+// The heatmap displays by WEEK, not by day, so the two peak dates alone
+// aren't enough: week 9 (Nov 24-30) and week 10 (Dec 1-7) each have five
+// other days that would otherwise fall back to generic (undifferentiated)
+// volume and dilute the weekly aggregate back toward baseline. These
+// "shoulder" days get their own smaller, still-directional construction so
+// the WEEKLY cell — what actually renders — carries the signal, not just
+// the two hand-tuned peak days inside it.
+const WEEK9_SHOULDER_DATES = ['2025-11-24', '2025-11-27', '2025-11-28', '2025-11-29'];
+const WEEK10_SHOULDER_DATES = ['2025-12-02', '2025-12-03', '2025-12-04', '2025-12-05', '2025-12-06', '2025-12-07'];
+const F1_ALL_DATES = [...F1_OUT_DATES, ...F1_RETURN_DATES, ...WEEK9_SHOULDER_DATES, ...WEEK10_SHOULDER_DATES];
 
 // ===========================================================================
 // Small helpers
@@ -159,7 +169,7 @@ function isF1Corridor(origin: City, destination: City): boolean {
 
 function isF1Date(d: Date): boolean {
   const iso = isoDate(d);
-  return F1_OUT_DATES.includes(iso) || F1_RETURN_DATES.includes(iso);
+  return F1_ALL_DATES.includes(iso);
 }
 
 // ===========================================================================
