@@ -58,18 +58,6 @@ main.flex-col > * {
   animation: heatmap-cell-in 220ms ease-out backwards;
 }
 
-.heatmap-tooltip {
-  opacity: 0;
-  visibility: hidden;
-  transition: opacity 100ms ease-out;
-}
-
-.heatmap-cell:hover .heatmap-tooltip,
-.heatmap-cell:focus-visible .heatmap-tooltip {
-  opacity: 1;
-  visibility: visible;
-}
-
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.001ms !important;

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { WEEKS } from '@/lib/calendar';
 import { corridorLabel } from '@/lib/corridors';
@@ -157,6 +157,22 @@ export function CorridorHeatmap({ pairs }: { pairs: CorridorPairRow[] }) {
   const handleLeave = useCallback(() => {
     hideTimer.current = setTimeout(() => setTooltip(null), 0);
   }, []);
+
+  // The anchor rect is captured once, in viewport coordinates, at hover
+  // time. Scrolling (the grid's own horizontal scrollbar, or the page)
+  // moves the cell without firing another hover, so the fixed-position
+  // tooltip would otherwise freeze in place and drift over unrelated
+  // content — dismiss it on any scroll instead of showing a stale one.
+  useEffect(() => {
+    if (!tooltip) return;
+    const close = () => setTooltip(null);
+    window.addEventListener('scroll', close, { capture: true, passive: true });
+    window.addEventListener('resize', close);
+    return () => {
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+    };
+  }, [tooltip]);
 
   return (
     <div className="overflow-x-auto">
