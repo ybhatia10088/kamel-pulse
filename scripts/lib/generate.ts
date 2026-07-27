@@ -7,8 +7,9 @@ import {
   TERM_END,
   TERM_START,
   WEEKS,
+  weekIndexForDate,
 } from '@/lib/calendar';
-import { chance, gaussian, lognormal, mulberry32, pick, type Rng, randInt, seededUuid, shuffle, weightedPick } from './prng';
+import { chance, gaussian, lognormal, mulberry32, pick, randFloat, type Rng, randInt, seededUuid, shuffle, weightedPick } from './prng';
 import { DIRECTED_CORRIDORS, dowWeights, SEATS_NEEDED_DIST, SEATS_TOTAL_DIST, type DirectedCorridor } from './domain';
 import { generateUsers, type SeedUser } from './users';
 
@@ -172,6 +173,25 @@ function isF1Date(d: Date): boolean {
   return F1_ALL_DATES.includes(iso);
 }
 
+const F1_WEEK_INDICES = new Set([8, 9]); // weeks n=9 ("Nov 24") and n=10 ("Dec 1")
+
+/**
+ * Picks a departure date for generic (non-override) generation, steering
+ * clear of weeks 8/9 entirely for the F1 corridor — every day in those two
+ * weeks is now reserved for the hand-tuned Thanksgiving construction, so a
+ * "retry until it's not an F1 date" loop would never terminate for this
+ * corridor in those weeks. Picking a different week outright avoids that
+ * instead of looping.
+ */
+function pickSafeDepartureDate(rng: Rng, corridor: DirectedCorridor): Date {
+  const avoidF1Weeks = isF1Corridor(corridor.origin, corridor.destination);
+  let weekIdx = randInt(rng, 0, WEEKS.length - 1);
+  if (avoidF1Weeks) {
+    while (F1_WEEK_INDICES.has(weekIdx)) weekIdx = randInt(rng, 0, WEEKS.length - 1);
+  }
+  return pickDepartureDate(rng, weekIdx, corridor);
+}
+
 // ===========================================================================
 // Driver buckets (F3)
 // ===========================================================================
@@ -325,6 +345,15 @@ function buildThanksgivingRides(
   // Return Nov 30-Dec 1: inverted.
   buildSlice('nyc', 'ithaca', F1_RETURN_DATES, 90, 243, 0.36);
   buildSlice('ithaca', 'nyc', F1_RETURN_DATES, 55, 19, 0.05);
+
+  // Shoulder days: the rest of week 9 (Nov 24-30) and week 10 (Dec 1-7),
+  // smaller in magnitude than the two peak days but same direction, so the
+  // WEEKLY heatmap cell (which blends all 7 days) still reads as the most
+  // extreme cell in its row instead of getting diluted back to baseline.
+  buildSlice('ithaca', 'nyc', WEEK9_SHOULDER_DATES, 75, 260, 0.25);
+  buildSlice('nyc', 'ithaca', WEEK9_SHOULDER_DATES, 140, 25, 0.05);
+  buildSlice('nyc', 'ithaca', WEEK10_SHOULDER_DATES, 80, 220, 0.22);
+  buildSlice('ithaca', 'nyc', WEEK10_SHOULDER_DATES, 130, 30, 0.05);
 
   return out;
 }
@@ -970,12 +999,8 @@ function buildCampusLiquidityPadding(
         rng,
         corridors.map((c) => [c, c.share] as const)
       );
-      const weekIdx = randInt(rng, 0, WEEKS.length - 1);
-      let departureAt = pickDepartureDate(rng, weekIdx, corridor);
-      if (isF1Corridor(corridor.origin, corridor.destination)) {
-        // Keep this generic pool from contaminating the hand-tuned F1 slices.
-        while (isF1Date(departureAt)) departureAt = pickDepartureDate(rng, weekIdx, corridor);
-      }
+      // Keep this generic pool from contaminating the hand-tuned F1 slices.
+      const departureAt = pickSafeDepartureDate(rng, corridor);
       const leadDays = sampleLeadDays(rng, departureAt);
       const searchedAt = clampToTerm(atHour(addDays(departureAt, -leadDays), rng));
       const passenger = chance(rng, 0.55) && passengers.length > 0 ? pick(rng, passengers) : null;
@@ -1084,11 +1109,7 @@ function buildGenericSearchPadding(
 
     if (candidates.length === 0 || chance(rng, 0.22)) {
       // No supply on this corridor at all, or a random miss even where supply exists.
-      const weekIdx = randInt(rng, 0, WEEKS.length - 1);
-      let departureAt = pickDepartureDate(rng, weekIdx, corridor);
-      if (isF1Corridor(corridor.origin, corridor.destination)) {
-        while (isF1Date(departureAt)) departureAt = pickDepartureDate(rng, weekIdx, corridor);
-      }
+      const departureAt = pickSafeDepartureDate(rng, corridor);
       const leadDays = sampleLeadDays(rng, departureAt);
       const searchedAt = clampToTerm(atHour(addDays(departureAt, -leadDays), rng));
       events.push({
@@ -1145,6 +1166,195 @@ function buildGenericSearchPadding(
       candidates.map((r) => r.rideId)
     );
   }
+}
+
+// ===========================================================================
+// Baseline ratio correction: pull non-Thanksgiving corridor-weeks toward a
+// per-corridor-group target band instead of the wide, uncorrelated variance
+// that demand (search volume, sized off F2's exact conversion rates) and
+// supply (ride_listed, sized off F3's fill-rate buckets / F4's campus
+// padding) naturally produce when generated through independent pathways.
+// Left alone that variance makes the heatmap almost uniformly orange, which
+// buries the Thanksgiving signal instead of setting it apart.
+//
+// The target band is NOT one constant for every corridor: Cornell corridors
+// target a band whose average is exactly F4's Cornell aggregate
+// (listed/demanded = 0.85 -> demanded/listed ~= 1.176), which already sits
+// inside the "balanced" heatmap band. Binghamton corridors target a band
+// centered on F4's Binghamton aggregate instead (listed/demanded = 0.42 ->
+// demanded/listed ~= 2.38) — a real, visible shortage signal, not noise —
+// so this pass tightens variance without erasing the planted F4 finding.
+// Only ever adds events (never removes), so booking counts, reviews, and
+// campus-attributed volume that F2/F3/F7 depend on are untouched.
+// ===========================================================================
+
+const CORNELL_RATIO_MIN = 0.95;
+const CORNELL_RATIO_MAX = 1.4;
+const BINGHAMTON_RATIO_MIN = 1.9;
+const BINGHAMTON_RATIO_MAX = 2.9;
+
+function corridorWeekKey(origin: City, destination: City, weekIdx: number): string {
+  return `${origin}__${destination}__${weekIdx}`;
+}
+
+function correctBaselineRatios(
+  rng: Rng,
+  events: GeneratedEvent[],
+  cornellUsers: SeedUser[],
+  binghamtonUsers: SeedUser[],
+  buckets: Map<string, FillBucket>
+): void {
+  // Added listed capacity here never gets a booking, so it must land on
+  // drivers F3 doesn't score: the 'mid' bucket (1-2 reviews) is explicitly
+  // reserved as a safe absorber — 'zero'/'veteran' drivers are exactly
+  // F3's two checked cohorts, and piling unbooked seats onto them would
+  // drag both fill rates down and erase that planted finding.
+  const cornellDrivers = cornellUsers.filter((u) => u.canDrive && buckets.get(u.id) === 'mid');
+  const binghamtonDrivers = binghamtonUsers.filter((u) => u.canDrive && buckets.get(u.id) === 'mid');
+
+  const searchedByKey = new Map<string, GeneratedEvent[]>();
+  const listedSeatsByKey = new Map<string, number>();
+  for (const e of events) {
+    if (!e.origin || !e.destination || !e.departureAt) continue;
+    const key = corridorWeekKey(e.origin, e.destination, weekIndexForDate(e.departureAt));
+    if (e.eventName === 'ride_searched') {
+      if (!searchedByKey.has(key)) searchedByKey.set(key, []);
+      searchedByKey.get(key)!.push(e);
+    } else if (e.eventName === 'ride_listed') {
+      const seats = Number((e.properties as Record<string, unknown>).seats_total ?? 0);
+      listedSeatsByKey.set(key, (listedSeatsByKey.get(key) ?? 0) + seats);
+    }
+  }
+
+  const additions: GeneratedEvent[] = [];
+
+  for (const corridor of DIRECTED_CORRIDORS) {
+    for (let weekIdx = 0; weekIdx < WEEKS.length; weekIdx++) {
+      if (isF1Corridor(corridor.origin, corridor.destination) && F1_WEEK_INDICES.has(weekIdx)) continue;
+
+      const key = corridorWeekKey(corridor.origin, corridor.destination, weekIdx);
+      const listed = listedSeatsByKey.get(key) ?? 0;
+
+      const searched = searchedByKey.get(key) ?? [];
+      const demanded = searched.reduce((s, e) => s + Number((e.properties as Record<string, unknown>).seats_needed ?? 0), 0);
+      if (listed === 0 && demanded === 0) continue;
+
+      const isBinghamtonCorridor = corridor.origin === 'binghamton' || corridor.destination === 'binghamton';
+      const ratio = demanded / Math.max(listed, 1);
+      const targetRatio = isBinghamtonCorridor
+        ? randFloat(rng, BINGHAMTON_RATIO_MIN, BINGHAMTON_RATIO_MAX)
+        : randFloat(rng, CORNELL_RATIO_MIN, CORNELL_RATIO_MAX);
+
+      if (ratio > targetRatio) {
+        // Too much demand relative to supply: add listed-only capacity
+        // (zero bookings, so F3's fill-rate buckets and booking counts are
+        // untouched) rather than removing demand — most of this corridor's
+        // search volume is either profile-viewed (F2's engaged denominator)
+        // or campus-attributed (F4's liquidity target), so there's rarely a
+        // "safe to delete" session available anyway.
+        const targetListed = demanded / targetRatio;
+        let neededSeats = targetListed - listed;
+        // campus stays null: this is generic-marketplace supply, not the
+        // campus-attributed cohort F4's liquidity ratio is computed from.
+        // Driver pool is still geography-appropriate so thin corridors keep
+        // realistic drivers, but tagging it cornell/binghamton here would
+        // dump this pass's volume straight into F4's numerator and swamp
+        // its own, much smaller, deliberately-calibrated campus population.
+        const campus: Campus | null = null;
+        const driverPool = isBinghamtonCorridor ? binghamtonDrivers : cornellDrivers;
+        const weekStart = new Date(`${WEEKS[weekIdx].start}T00:00:00Z`);
+        while (neededSeats > 0 && driverPool.length > 0) {
+          const seatsTotal = seatsFromDist(rng);
+          const departureAt = addDays(weekStart, randInt(rng, 0, 6));
+          departureAt.setUTCHours(randInt(rng, 7, 20), 0, 0, 0);
+          const leadDays = Math.round(lognormal(rng, 12, 0.6, 1, 50));
+          const listedAt = clampToTerm(addDays(departureAt, -leadDays));
+          const driver = pick(rng, driverPool);
+          const rideId = `ride_corr_${seededUuid(rng)}`;
+          additions.push({
+            eventName: 'ride_listed',
+            eventId: seededUuid(rng),
+            userId: driver.id,
+            anonymousId: `anon_${driver.id}`,
+            sessionId: `sess_list_${rideId}`,
+            occurredAt: listedAt,
+            campus,
+            origin: corridor.origin,
+            destination: corridor.destination,
+            departureAt,
+            rideId,
+            driverId: driver.id,
+            properties: {
+              ride_id: rideId,
+              origin: corridor.origin,
+              destination: corridor.destination,
+              departure_at: departureAt.toISOString(),
+              seats_total: seatsTotal,
+              cost_share_per_seat: randInt(rng, corridor.costShare[0], corridor.costShare[1]),
+            },
+          });
+          neededSeats -= seatsTotal;
+        }
+      } else if (ratio < targetRatio) {
+        const targetDemand = listed * targetRatio;
+        let neededSeats = targetDemand - demanded;
+        const weekStart = new Date(`${WEEKS[weekIdx].start}T00:00:00Z`);
+        while (neededSeats > 0) {
+          const seatsNeeded = seatsNeededFromDist(rng);
+          const departureAt = addDays(weekStart, randInt(rng, 0, 6));
+          departureAt.setUTCHours(randInt(rng, 7, 20), 0, 0, 0);
+          const leadDays = sampleLeadDays(rng, departureAt);
+          const searchedAt = clampToTerm(atHour(addDays(departureAt, -leadDays), rng));
+          const sessionId = `sess_${seededUuid(rng)}`;
+          const anonymousId = `anon_${seededUuid(rng)}`;
+          additions.push({
+            eventName: 'ride_searched',
+            eventId: seededUuid(rng),
+            userId: null,
+            anonymousId,
+            sessionId,
+            occurredAt: searchedAt,
+            campus: null,
+            origin: corridor.origin,
+            destination: corridor.destination,
+            departureAt,
+            rideId: null,
+            driverId: null,
+            properties: {
+              origin: corridor.origin,
+              destination: corridor.destination,
+              departure_date: isoDate(departureAt),
+              seats_needed: seatsNeeded,
+              results_count: 0,
+            },
+          });
+          additions.push({
+            eventName: 'search_returned_empty',
+            eventId: seededUuid(rng),
+            userId: null,
+            anonymousId,
+            sessionId,
+            occurredAt: new Date(searchedAt.getTime() + 1000),
+            campus: null,
+            origin: corridor.origin,
+            destination: corridor.destination,
+            departureAt,
+            rideId: null,
+            driverId: null,
+            properties: {
+              origin: corridor.origin,
+              destination: corridor.destination,
+              departure_date: isoDate(departureAt),
+              seats_needed: seatsNeeded,
+            },
+          });
+          neededSeats -= seatsNeeded;
+        }
+      }
+    }
+  }
+
+  events.push(...additions);
 }
 
 // ===========================================================================
@@ -1357,11 +1567,7 @@ function buildRoleDualityTopUp(rng: Rng, rides: Ride[], users: SeedUser[], event
 
       if (!listedBy.has(user.id)) {
         const corridor = pick(rng, corridorPool);
-        const weekIdx = randInt(rng, 0, WEEKS.length - 1);
-        let departureAt = pickDepartureDate(rng, weekIdx, corridor);
-        if (isF1Corridor(corridor.origin, corridor.destination)) {
-          while (isF1Date(departureAt)) departureAt = pickDepartureDate(rng, weekIdx, corridor);
-        }
+        const departureAt = pickSafeDepartureDate(rng, corridor);
         const ride = newRide(
           rng,
           rides,
@@ -1511,6 +1717,7 @@ export function generate(seed: number): GeneratedDataset {
   buildCampusLiquidityPadding(rng, genericRides, cornellUsers, binghamtonUsers, events);
   buildGenericSearchPadding(rng, rides, cornellUsers, binghamtonUsers, events, counters, 8600);
   buildRoleDualityTopUp(rng, rides, users, events);
+  correctBaselineRatios(rng, events, cornellUsers, binghamtonUsers, buckets);
   buildPostTripEvents(rng, rides, events);
   buildReviews(rng, rides, users, events);
   buildCancellations(rng, events);

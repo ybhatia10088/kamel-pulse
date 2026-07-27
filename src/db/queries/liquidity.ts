@@ -53,7 +53,13 @@ export type HeatmapCell = {
   unmetDemandRatio: number;
   fillRate: number;
   zeroResultRate: number;
+  insufficientData: boolean;
 };
+
+// Below this many listed seats, unmetDemandRatio divides by a near-empty
+// denominator and swings wildly on a handful of searches — not a real
+// signal. Cells this thin render as "insufficient data" instead of a color.
+const MIN_LISTED_FOR_RATIO = 10;
 
 export type CorridorPairRow = {
   pairKey: string;
@@ -99,6 +105,7 @@ export async function getHeatmapData(): Promise<CorridorPairRow[]> {
       unmetDemandRatio: seatsDemanded / Math.max(seatsListed, 1),
       fillRate: seatsBooked / Math.max(seatsListed, 1),
       zeroResultRate: emptySearches / Math.max(searches, 1),
+      insufficientData: seatsListed < MIN_LISTED_FOR_RATIO,
     };
     if (!cellsByCorridor.has(key)) cellsByCorridor.set(key, []);
     cellsByCorridor.get(key)!.push(cell);
