@@ -12,7 +12,7 @@ So this dashboard is built around the two events most analytics setups never add
 
 ## The insight this surfaced
 
-The heatmap pairs every corridor with its return leg on purpose. Alone, a hot Ithaca → NYC column in late November just looks like a busy corridor. Next to NYC → Ithaca the *same week* (above), it's a coordination failure: the students who need a ride out are the same people who'd otherwise drive the return leg, and almost nobody makes that trip on the day everyone needs it. One leg runs 3-to-1 oversubscribed; the other fills a quarter of its seats. Same people, wrong direction — so the fix is specific: recruit return-leg drivers for break weekends instead of waiting for supply to show up on its own.
+The heatmap pairs every corridor with its return leg on purpose. Alone, a hot Ithaca → NYC column in late November just looks like a busy corridor. Next to NYC → Ithaca the *same week* (above), it's a coordination failure: the students who need a ride out are the same people who'd otherwise drive the return leg, and almost nobody makes that trip on the day everyone needs it. One leg runs 3-to-1 oversubscribed; the other fills less than a third of its seats. Same people, wrong direction — so the fix is specific: recruit return-leg drivers for break weekends instead of waiting for supply to show up on its own.
 
 ## Event taxonomy
 
