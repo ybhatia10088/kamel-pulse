@@ -4,6 +4,7 @@ type ComparisonItem = {
   label: string;
   value: number; // 0-1 fraction
   n: number;
+  nUnit: string; // what n counts ('sessions', 'drivers', ...) — left unlabeled, "n=137" reads as directly comparable to any other n on the page even when the unit differs
   emphasis?: boolean;
 };
 
@@ -23,7 +24,7 @@ function Bar({ item }: { item: ComparisonItem }) {
           style={{ width: `${pct}%`, background: item.emphasis ? 'var(--shortage)' : 'var(--surplus)' }}
         />
       </div>
-      <span className="font-mono text-[11px] text-muted">n={formatInt(item.n)}</span>
+      <span className="font-mono text-[11px] text-muted">n={formatInt(item.n)} {item.nUnit}</span>
     </div>
   );
 }

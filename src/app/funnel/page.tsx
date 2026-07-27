@@ -4,6 +4,7 @@ import { ComparisonBars } from '@/components/ComparisonBars';
 import { FunnelChart } from '@/components/FunnelChart';
 import { Card, CardCaption, CardEyebrow } from '@/components/ui/Card';
 import { getCancellationTiming, getFunnelSteps, getMessagingLift, getReviewLift } from '@/db/queries/funnel';
+import { formatInt, formatPercent } from '@/lib/format';
 
 export const revalidate = 0;
 
@@ -16,6 +17,7 @@ export default async function FunnelPage() {
   ]);
 
   const largestDrop = steps.find((s) => s.isLargestDrop);
+  const messagedShare = messaging.messagedN / Math.max(messaging.messagedN + messaging.nonMessagedN, 1);
 
   return (
     <main className="mx-auto flex w-full max-w-[1280px] flex-col gap-10 overflow-x-hidden px-6 py-8 sm:px-10">
@@ -44,6 +46,13 @@ export default async function FunnelPage() {
             {Math.round(largestDrop.dropFromPrevPct * 100)}% of sessions that reached the prior step.
           </CardCaption>
         )}
+        <CardCaption>
+          Messaging isn&apos;t shown as a step here on purpose: it&apos;s a branch off &quot;driver profile viewed,&quot; not a gate everyone
+          passes through. {formatPercent(messagedShare)} of those sessions ({formatInt(messaging.messagedN)} of{' '}
+          {formatInt(messaging.messagedN + messaging.nonMessagedN)}) messaged the driver first — the other{' '}
+          {formatPercent(1 - messagedShare)} reserved without messaging, not dropped off. Their conversion rates diverge sharply — see
+          below.
+        </CardCaption>
       </section>
 
       <section>
@@ -52,20 +61,25 @@ export default async function FunnelPage() {
           <ComparisonBars
             title="Messaged the driver first, before reserving a seat"
             items={[
-              { label: 'Messaged first', value: messaging.messagedRate, n: messaging.messagedN, emphasis: false },
-              { label: 'Did not message', value: messaging.nonMessagedRate, n: messaging.nonMessagedN, emphasis: true },
+              { label: 'Messaged first', value: messaging.messagedRate, n: messaging.messagedN, nUnit: 'sessions', emphasis: false },
+              { label: 'Did not message', value: messaging.nonMessagedRate, n: messaging.nonMessagedN, nUnit: 'sessions', emphasis: true },
             ]}
           />
           <div className="h-px bg-rule" />
           <ComparisonBars
             title="Driver's review history at time of booking"
             items={[
-              { label: 'Driver has ≥3 reviews', value: reviews.veteranFillRate, n: reviews.veteranN, emphasis: false },
-              { label: 'Driver has none', value: reviews.zeroFillRate, n: reviews.zeroN, emphasis: true },
+              { label: 'Driver has ≥3 reviews', value: reviews.veteranFillRate, n: reviews.veteranN, nUnit: 'drivers', emphasis: false },
+              { label: 'Driver has none', value: reviews.zeroFillRate, n: reviews.zeroN, nUnit: 'drivers', emphasis: true },
             ]}
           />
         </Card>
         <CardCaption>The social layer is not a retention feature. It is the conversion mechanism.</CardCaption>
+        <CardCaption>
+          The review comparison is restricted to drivers with 0 or 3+ reviews on purpose — a 1-2 review middle band sits between them with
+          its own fill rate, and blending it in would blur the comparison. That excludes most drivers by count, but not by volume: the two
+          compared tiers still cover {formatPercent(reviews.sessionCoverageRate)} of driver-profile-view sessions platform-wide.
+        </CardCaption>
       </section>
 
       <section className="pb-10">

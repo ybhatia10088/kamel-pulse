@@ -5,11 +5,16 @@ function toRows<T = Record<string, string>>(result: Awaited<ReturnType<typeof db
   return result.rows as unknown as T[];
 }
 
+// message_thread_started is deliberately excluded: it's a branch off
+// driver_profile_viewed, not a gate every session passes through (plenty
+// reserve without ever messaging), so a strictly sequential funnel would
+// draw it as if the non-messaging sessions had dropped off rather than
+// converted through the other path. Its own volume and lift live in
+// getMessagingLift() instead.
 const FUNNEL_STEPS = [
   'ride_searched',
   'ride_viewed',
   'driver_profile_viewed',
-  'message_thread_started',
   'seat_reserved',
   'booking_completed',
   'review_submitted',
@@ -77,7 +82,13 @@ export async function getMessagingLift(): Promise<MessagingLift> {
   };
 }
 
-export type ReviewLift = { veteranFillRate: number; zeroFillRate: number; veteranN: number; zeroN: number };
+export type ReviewLift = {
+  veteranFillRate: number;
+  zeroFillRate: number;
+  veteranN: number; // drivers, not sessions — see sessionCoverageRate for a session-comparable figure
+  zeroN: number;
+  sessionCoverageRate: number; // fraction of driver_profile_viewed sessions that were for a veteran- or zero-review driver
+};
 
 export async function getReviewLift(): Promise<ReviewLift> {
   const result = await db.execute(sql`
@@ -106,11 +117,31 @@ export async function getReviewLift(): Promise<ReviewLift> {
     LEFT JOIN driver_booked bk ON bk.driver_id = s.driver_id
   `);
   const r = toRows(result)[0] as unknown as Record<string, unknown>;
+
+  // veteranN/zeroN count drivers; this is the same comparison in session
+  // terms, so a reader can sanity-check "n=94 drivers" against the funnel's
+  // session counts without conflating the two units themselves.
+  const coverage = await db.execute(sql`
+    WITH driver_reviews AS (
+      SELECT driver_id, COUNT(*) AS n FROM events
+      WHERE event_name = 'review_submitted' AND properties->>'reviewer_role' = 'passenger'
+      GROUP BY driver_id
+    ),
+    viewed AS (SELECT DISTINCT session_id, driver_id FROM events WHERE event_name = 'driver_profile_viewed')
+    SELECT
+      COUNT(DISTINCT v.session_id) FILTER (WHERE r.n >= 3 OR r.n IS NULL) AS covered_sessions,
+      COUNT(DISTINCT v.session_id) AS total_sessions
+    FROM viewed v
+    LEFT JOIN driver_reviews r ON r.driver_id = v.driver_id
+  `);
+  const c = toRows(coverage)[0] as unknown as Record<string, unknown>;
+
   return {
     veteranFillRate: Number(r.veteran_booked) / Math.max(Number(r.veteran_listed), 1),
     zeroFillRate: Number(r.zero_booked) / Math.max(Number(r.zero_listed), 1),
     veteranN: Number(r.veteran_n),
     zeroN: Number(r.zero_n),
+    sessionCoverageRate: Number(c.covered_sessions) / Math.max(Number(c.total_sessions), 1),
   };
 }
 
