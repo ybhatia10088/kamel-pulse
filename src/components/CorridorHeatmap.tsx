@@ -177,10 +177,16 @@ export function CorridorHeatmap({ pairs }: { pairs: CorridorPairRow[] }) {
   return (
     <div className="overflow-x-auto">
       <div className="min-w-[820px]">
-        {/* header row */}
-        <div className="grid grid-cols-[160px_1fr]">
+        {/* header row: relative + z-20 so the Thanksgiving marker below it
+            paints above the first grid row instead of losing a paint-order
+            tie — both are static, same-level siblings of the rows block,
+            and DOM order alone would let the row underneath win. pb-5 (not
+            the original pb-2) actually reserves enough space for the
+            marker's own height so it doesn't overlap the next row at all —
+            the z-index above is a backstop, not the primary fix. */}
+        <div className="relative z-20 grid grid-cols-[160px_1fr]">
           <div className="sticky left-0 z-10 bg-paper" />
-          <div className="grid grid-cols-12 gap-px pb-2">
+          <div className="grid grid-cols-12 gap-px pb-5">
             {WEEKS.map((w, i) => (
               <div key={w.n} className="relative text-center">
                 <span className="font-mono text-[10px] text-muted">{w.label}</span>
